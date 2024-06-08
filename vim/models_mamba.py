@@ -101,14 +101,7 @@ class Block(nn.Module):
             residual: hidden_states = Mixer(LN(residual))
         """
         if not self.fused_add_norm:
-            if residual is None:
-                residual = hidden_states
-            else:
-                residual = residual + self.drop_path(hidden_states)
-            
-            hidden_states = self.norm(residual.to(dtype=self.norm.weight.dtype))
-            if self.residual_in_fp32:
-                residual = residual.to(torch.float32)
+            raise ValueError("fused_add_norm should always be true")
         else:
             fused_add_norm_fn = rms_norm_fn if isinstance(self.norm, RMSNorm) else layer_norm_fn
             if residual is None:
@@ -297,13 +290,7 @@ class VisionMamba(nn.Module):
             self.pos_drop = nn.Dropout(p=drop_rate)
 
         if if_rope:
-            half_head_dim = embed_dim // 2
-            hw_seq_len = img_size // patch_size
-            self.rope = VisionRotaryEmbeddingFast(
-                dim=half_head_dim,
-                pt_seq_len=pt_hw_seq_len,
-                ft_seq_len=hw_seq_len
-            )
+            raise ValueError("should always be: if_rope=False")
         self.head = nn.Linear(self.num_features, num_classes) if num_classes > 0 else nn.Identity()
 
 
@@ -396,15 +383,8 @@ class VisionMamba(nn.Module):
                     token_position = M // 2
                     # add cls token in the middle
                     x = torch.cat((x[:, :token_position, :], cls_token, x[:, token_position:, :]), dim=1)
-                elif if_random_cls_token_position:
-                    cls_token = self.cls_token.expand(B, -1, -1)
-                    token_position = random.randint(0, M)
-                    x = torch.cat((x[:, :token_position, :], cls_token, x[:, token_position:, :]), dim=1)
-                    print("token_position: ", token_position)
                 else:
-                    cls_token = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
-                    token_position = 0
-                    x = torch.cat((cls_token, x), dim=1)
+                    raise ValueError("should always be: use_middle_cls_token=True")
                 M = x.shape[1]
 
         if self.if_abs_pos_embed:
@@ -466,14 +446,10 @@ class VisionMamba(nn.Module):
 
                 # rope about
                 if self.if_rope:
-                    hidden_states = self.rope(hidden_states)
-                    if residual is not None and self.if_rope_residual:
-                        residual = self.rope(residual)
+                    raise ValueError("should always be: if_rope=False")
 
                 if if_flip_img_sequences and self.if_rope:
-                    hidden_states = hidden_states.flip([1])
-                    if residual is not None:
-                        residual = residual.flip([1])
+                    raise ValueError("should always be: if_rope=False")
 
                 hidden_states, residual = layer(
                     hidden_states, residual, inference_params=inference_params
@@ -482,9 +458,7 @@ class VisionMamba(nn.Module):
             # get two layers in a single for-loop
             for i in range(len(self.layers) // 2):
                 if self.if_rope:
-                    hidden_states = self.rope(hidden_states)
-                    if residual is not None and self.if_rope_residual:
-                        residual = self.rope(residual)
+                    raise ValueError("should always be: if_rope=False")
 
                 hidden_states_f, residual_f = self.layers[i * 2](
                     hidden_states, residual, inference_params=inference_params
@@ -496,11 +470,7 @@ class VisionMamba(nn.Module):
                 residual = residual_f + residual_b.flip([1])
 
         if not self.fused_add_norm:
-            if residual is None:
-                residual = hidden_states
-            else:
-                residual = residual + self.drop_path(hidden_states)
-            hidden_states = self.norm_f(residual.to(dtype=self.norm_f.weight.dtype))
+            raise ValueError("fused_add_norm should always be true")
         else:
             # Set prenorm=False here since we don't need the residual
             fused_add_norm_fn = rms_norm_fn if isinstance(self.norm_f, RMSNorm) else layer_norm_fn
@@ -521,21 +491,13 @@ class VisionMamba(nn.Module):
             else:
                 if self.use_middle_cls_token:
                     return hidden_states[:, token_position, :]
-                elif if_random_cls_token_position:
-                    return hidden_states[:, token_position, :]
                 else:
-                    return hidden_states[:, token_position, :]
+                    raise ValueError("should always be: use_middle_cls_token=True")
 
-        if self.final_pool_type == 'none':
-            return hidden_states[:, -1, :]
-        elif self.final_pool_type == 'mean':
+        if self.final_pool_type == 'mean':
             return hidden_states.mean(dim=1)
-        elif self.final_pool_type == 'max':
-            return hidden_states
-        elif self.final_pool_type == 'all':
-            return hidden_states
         else:
-            raise NotImplementedError
+            raise ValueError("should always be: final_pool_type=mean")
 
     def forward(self, x, return_features=False, inference_params=None, if_random_cls_token_position=False, if_random_token_rank=False):
         x = self.forward_features(x, inference_params, if_random_cls_token_position=if_random_cls_token_position, if_random_token_rank=if_random_token_rank)
@@ -543,48 +505,9 @@ class VisionMamba(nn.Module):
             return x
         x = self.head(x)
         if self.final_pool_type == 'max':
-            x = x.max(dim=1)[0]
+            raise ValueError("should always be: final_pool_type=mean")
         return x
 
-
-@register_model
-def vim_tiny_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2(pretrained=False, **kwargs):
-    model = VisionMamba(
-        patch_size=16, embed_dim=192, depth=24, rms_norm=True, residual_in_fp32=True, fused_add_norm=True, final_pool_type='mean', if_abs_pos_embed=True, if_rope=False, if_rope_residual=False, bimamba_type="v2", if_cls_token=True, if_devide_out=True, use_middle_cls_token=True, **kwargs)
-    model.default_cfg = _cfg()
-    if pretrained:
-        checkpoint = torch.hub.load_state_dict_from_url(
-            url="to.do",
-            map_location="cpu", check_hash=True
-        )
-        model.load_state_dict(checkpoint["model"])
-    return model
-
-@register_model
-def vim_tiny_patch16_stride8_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2(pretrained=False, **kwargs):
-    model = VisionMamba(
-        patch_size=16, stride=8, embed_dim=192, depth=24, rms_norm=True, residual_in_fp32=True, fused_add_norm=True, final_pool_type='mean', if_abs_pos_embed=True, if_rope=False, if_rope_residual=False, bimamba_type="v2", if_cls_token=True, if_devide_out=True, use_middle_cls_token=True, **kwargs)
-    model.default_cfg = _cfg()
-    if pretrained:
-        checkpoint = torch.hub.load_state_dict_from_url(
-            url="to.do",
-            map_location="cpu", check_hash=True
-        )
-        model.load_state_dict(checkpoint["model"])
-    return model
-
-@register_model
-def vim_small_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2(pretrained=False, **kwargs):
-    model = VisionMamba(
-        patch_size=16, embed_dim=384, depth=24, rms_norm=True, residual_in_fp32=True, fused_add_norm=True, final_pool_type='mean', if_abs_pos_embed=True, if_rope=False, if_rope_residual=False, bimamba_type="v2", if_cls_token=True, if_devide_out=True, use_middle_cls_token=True, **kwargs)
-    model.default_cfg = _cfg()
-    if pretrained:
-        checkpoint = torch.hub.load_state_dict_from_url(
-            url="to.do",
-            map_location="cpu", check_hash=True
-        )
-        model.load_state_dict(checkpoint["model"])
-    return model
 
 @register_model
 def vim_small_patch16_stride8_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2(pretrained=False, **kwargs):
