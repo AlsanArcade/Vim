@@ -100,30 +100,27 @@ class Block(nn.Module):
             hidden_states: the sequence to the encoder layer (required).
             residual: hidden_states = Mixer(LN(residual))
         """
-        if not self.fused_add_norm:
-            raise ValueError("fused_add_norm should always be true")
+        fused_add_norm_fn = rms_norm_fn if isinstance(self.norm, RMSNorm) else layer_norm_fn
+        if residual is None:
+            hidden_states, residual = fused_add_norm_fn(
+                hidden_states,
+                self.norm.weight,
+                self.norm.bias,
+                residual=residual,
+                prenorm=True,
+                residual_in_fp32=self.residual_in_fp32,
+                eps=self.norm.eps,
+            )
         else:
-            fused_add_norm_fn = rms_norm_fn if isinstance(self.norm, RMSNorm) else layer_norm_fn
-            if residual is None:
-                hidden_states, residual = fused_add_norm_fn(
-                    hidden_states,
-                    self.norm.weight,
-                    self.norm.bias,
-                    residual=residual,
-                    prenorm=True,
-                    residual_in_fp32=self.residual_in_fp32,
-                    eps=self.norm.eps,
-                )
-            else:
-                hidden_states, residual = fused_add_norm_fn(
-                    self.drop_path(hidden_states),
-                    self.norm.weight,
-                    self.norm.bias,
-                    residual=residual,
-                    prenorm=True,
-                    residual_in_fp32=self.residual_in_fp32,
-                    eps=self.norm.eps,
-                )    
+            hidden_states, residual = fused_add_norm_fn(
+                self.drop_path(hidden_states),
+                self.norm.weight,
+                self.norm.bias,
+                residual=residual,
+                prenorm=True,
+                residual_in_fp32=self.residual_in_fp32,
+                eps=self.norm.eps,
+            )    
         hidden_states = self.mixer(hidden_states, inference_params=inference_params)
         return hidden_states, residual
 
@@ -276,18 +273,10 @@ class VisionMamba(nn.Module):
             img_size=img_size, patch_size=patch_size, stride=stride, in_chans=channels, embed_dim=embed_dim)
         num_patches = self.patch_embed.num_patches
 
-        if if_cls_token:
-            if use_double_cls_token:
-                self.cls_token_head = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
-                self.cls_token_tail = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
-                self.num_tokens = 2
-            else:
-                self.cls_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
-                # self.num_tokens = 1
-            
-        if if_abs_pos_embed:
-            self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + self.num_tokens, self.embed_dim))
-            self.pos_drop = nn.Dropout(p=drop_rate)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
+            # self.num_tokens = 1
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + self.num_tokens, self.embed_dim))
+        self.pos_drop = nn.Dropout(p=drop_rate)
 
         if if_rope:
             raise ValueError("should always be: if_rope=False")
@@ -369,135 +358,36 @@ class VisionMamba(nn.Module):
         # with slight modifications to add the dist_token
         x = self.patch_embed(x)
         B, M, _ = x.shape
-
-        if self.if_cls_token:
-            if self.use_double_cls_token:
-                cls_token_head = self.cls_token_head.expand(B, -1, -1)
-                cls_token_tail = self.cls_token_tail.expand(B, -1, -1)
-                token_position = [0, M + 1]
-                x = torch.cat((cls_token_head, x, cls_token_tail), dim=1)
-                M = x.shape[1]
-            else:
-                if self.use_middle_cls_token:
-                    cls_token = self.cls_token.expand(B, -1, -1)
-                    token_position = M // 2
-                    # add cls token in the middle
-                    x = torch.cat((x[:, :token_position, :], cls_token, x[:, token_position:, :]), dim=1)
-                else:
-                    raise ValueError("should always be: use_middle_cls_token=True")
-                M = x.shape[1]
-
-        if self.if_abs_pos_embed:
-            # if new_grid_size[0] == self.patch_embed.grid_size[0] and new_grid_size[1] == self.patch_embed.grid_size[1]:
-            #     x = x + self.pos_embed
-            # else:
-            #     pos_embed = interpolate_pos_embed_online(
-            #                 self.pos_embed, self.patch_embed.grid_size, new_grid_size,0
-            #             )
-            x = x + self.pos_embed
-            x = self.pos_drop(x)
-
-        if if_random_token_rank:
-
-            # 生成随机 shuffle 索引
-            shuffle_indices = torch.randperm(M)
-
-            if isinstance(token_position, list):
-                print("original value: ", x[0, token_position[0], 0], x[0, token_position[1], 0])
-            else:
-                print("original value: ", x[0, token_position, 0])
-            print("original token_position: ", token_position)
-
-            # 执行 shuffle
-            x = x[:, shuffle_indices, :]
-
-            if isinstance(token_position, list):
-                # 找到 cls token 在 shuffle 之后的新位置
-                new_token_position = [torch.where(shuffle_indices == token_position[i])[0].item() for i in range(len(token_position))]
-                token_position = new_token_position
-            else:
-                # 找到 cls token 在 shuffle 之后的新位置
-                token_position = torch.where(shuffle_indices == token_position)[0].item()
-
-            if isinstance(token_position, list):
-                print("new value: ", x[0, token_position[0], 0], x[0, token_position[1], 0])
-            else:
-                print("new value: ", x[0, token_position, 0])
-            print("new token_position: ", token_position)
-
-
-
-
-        if_flip_img_sequences = False
-        if self.flip_img_sequences_ratio > 0 and (self.flip_img_sequences_ratio - random.random()) > 1e-5:
-            x = x.flip([1])
-            if_flip_img_sequences = True
+        cls_token = self.cls_token.expand(B, -1, -1)
+        token_position = M // 2
+        # add cls token in the middle
+        x = torch.cat((x[:, :token_position, :], cls_token, x[:, token_position:, :]), dim=1)
+        x = x + self.pos_embed
+        x = self.pos_drop(x)
 
         # mamba impl
         residual = None
         hidden_states = x
-        if not self.if_bidirectional:
-            for layer in self.layers:
+        for layer in self.layers:
 
-                if if_flip_img_sequences and self.if_rope:
-                    hidden_states = hidden_states.flip([1])
-                    if residual is not None:
-                        residual = residual.flip([1])
-
-                # rope about
-                if self.if_rope:
-                    raise ValueError("should always be: if_rope=False")
-
-                if if_flip_img_sequences and self.if_rope:
-                    raise ValueError("should always be: if_rope=False")
-
-                hidden_states, residual = layer(
-                    hidden_states, residual, inference_params=inference_params
-                )
-        else:
-            # get two layers in a single for-loop
-            for i in range(len(self.layers) // 2):
-                if self.if_rope:
-                    raise ValueError("should always be: if_rope=False")
-
-                hidden_states_f, residual_f = self.layers[i * 2](
-                    hidden_states, residual, inference_params=inference_params
-                )
-                hidden_states_b, residual_b = self.layers[i * 2 + 1](
-                    hidden_states.flip([1]), None if residual == None else residual.flip([1]), inference_params=inference_params
-                )
-                hidden_states = hidden_states_f + hidden_states_b.flip([1])
-                residual = residual_f + residual_b.flip([1])
-
-        if not self.fused_add_norm:
-            raise ValueError("fused_add_norm should always be true")
-        else:
-            # Set prenorm=False here since we don't need the residual
-            fused_add_norm_fn = rms_norm_fn if isinstance(self.norm_f, RMSNorm) else layer_norm_fn
-            hidden_states = fused_add_norm_fn(
-                self.drop_path(hidden_states),
-                self.norm_f.weight,
-                self.norm_f.bias,
-                eps=self.norm_f.eps,
-                residual=residual,
-                prenorm=False,
-                residual_in_fp32=self.residual_in_fp32,
+            hidden_states, residual = layer(
+                hidden_states, residual, inference_params=inference_params
             )
+        
+        # Set prenorm=False here since we don't need the residual
+        fused_add_norm_fn = rms_norm_fn if isinstance(self.norm_f, RMSNorm) else layer_norm_fn
+        hidden_states = fused_add_norm_fn(
+            self.drop_path(hidden_states),
+            self.norm_f.weight,
+            self.norm_f.bias,
+            eps=self.norm_f.eps,
+            residual=residual,
+            prenorm=False,
+            residual_in_fp32=self.residual_in_fp32,
+        )
 
         # return only cls token if it exists
-        if self.if_cls_token:
-            if self.use_double_cls_token:
-                return (hidden_states[:, token_position[0], :] + hidden_states[:, token_position[1], :]) / 2
-            else:
-                if self.use_middle_cls_token:
-                    return hidden_states[:, token_position, :]
-                else:
-                    raise ValueError("should always be: use_middle_cls_token=True")
-
-        if self.final_pool_type == 'mean':
-            return hidden_states.mean(dim=1)
-        else:
-            raise ValueError("should always be: final_pool_type=mean")
+        return hidden_states[:, token_position, :]
 
     def forward(self, x, return_features=False, inference_params=None, if_random_cls_token_position=False, if_random_token_rank=False):
         x = self.forward_features(x, inference_params, if_random_cls_token_position=if_random_cls_token_position, if_random_token_rank=if_random_token_rank)

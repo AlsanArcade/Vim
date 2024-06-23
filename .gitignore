@@ -11,4 +11,6 @@ causal-conv1d/causal_conv1d.egg-info/
 causal-conv1d/causal_conv1d_cuda.cpython-310-x86_64-linux-gnu.so
 mamba/build/
 mamba/mamba_ssm.egg-info/
+mlruns/
+vim/ckpt/
 mamba/selective_scan_cuda.cpython-310-x86_64-linux-gnu.so
