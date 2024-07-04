@@ -18,16 +18,16 @@ from timm.optim import create_optimizer
 from timm.utils import NativeScaler, get_state_dict, ModelEma
 
 from datasets import build_dataset
-from engine import train_one_epoch, evaluate
-from losses import DistillationLoss
-from samplers import RASampler
-from augment import new_data_aug_generator
+from vim.engine import train_one_epoch, evaluate
+from vim.losses import DistillationLoss
+from vim.samplers import RASampler
+from vim.augment import new_data_aug_generator
 
 from contextlib import suppress
 
-import models_mamba
+import vim.models_mamba
 
-import utils
+import vim.utils as utils
 
 # log about
 import mlflow

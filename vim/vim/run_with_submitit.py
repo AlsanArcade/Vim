@@ -8,7 +8,7 @@ import os
 import uuid
 from pathlib import Path
 
-import main as classification
+import vim.main as classification
 import submitit
 
 

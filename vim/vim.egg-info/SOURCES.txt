@@ -1,0 +1,17 @@
+setup.py
+vim/__init__.py
+vim/augment.py
+vim/datasets.py
+vim/engine.py
+vim/hubconf.py
+vim/losses.py
+vim/main.py
+vim/models_mamba.py
+vim/rope.py
+vim/run_with_submitit.py
+vim/samplers.py
+vim/utils.py
+vim.egg-info/PKG-INFO
+vim.egg-info/SOURCES.txt
+vim.egg-info/dependency_links.txt
+vim.egg-info/top_level.txt
