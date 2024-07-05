@@ -77,7 +77,13 @@ Recently the state space models (SSMs) with efficient hardware-aware designs, i.
 ## Evaluation on Provided Weights
 To evaluate `Vim-Ti` on ImageNet-1K, run:
 ```bash
-python main.py --eval --resume /path/to/ckpt --model vim_tiny_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2 --data-path /path/to/imagenet
+python /home/albert/ml/Mambas/vim/Vim/vim/vim/main.py --eval --resume /home/albert/ml/Mambas/vim/Vim/vim/ckpt/vim_s_midclstok_ft_81p6acc.pth --model vim_small_patch16_stride8_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2 --data-path /home/albert/ml/Mambas/ImageNet1k/ILSVRC/Data/CLS-LOC
+```
+
+## Evaluation on Provided Weights w/ToMe
+To evaluate `Vim-Ti` on ImageNet-1K, run:
+```bash
+python /home/albert/ml/Mambas/vim/Vim/vim/vim/main.py --eval --resume /home/albert/ml/Mambas/vim/Vim/vim/ckpt/vim_s_midclstok_ft_81p6acc.pth  --model tome_vim_small_patch16_stride8_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2 --data-path /home/albert/ml/Mambas/ImageNet1k/ILSVRC/Data/CLS-LOC
 ```
 ## Acknowledgement :heart:
 This project is based on Mamba ([paper](https://arxiv.org/abs/2312.00752), [code](https://github.com/state-spaces/mamba)), Causal-Conv1d ([code](https://github.com/Dao-AILab/causal-conv1d)), DeiT ([paper](https://arxiv.org/abs/2012.12877), [code](https://github.com/facebookresearch/deit)). Thanks for their wonderful works.
