@@ -49,18 +49,26 @@ class PatchEmbed(nn.Module):
         self.grid_size = ((img_size[0] - patch_size[0]) // stride + 1, (img_size[1] - patch_size[1]) // stride + 1)
         self.num_patches = self.grid_size[0] * self.grid_size[1]
         self.flatten = flatten
+        self.embed_dim = embed_dim
+        self.stride = stride
 
         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=stride)
         self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity()
 
     def forward(self, x):
+        print(f"PE: params : img_size {self.img_size} patch_size {self.patch_size} embed_dim {self.embed_dim} stride {self.stride}")
+        print(f"PE: x init : {x.shape}")
         B, C, H, W = x.shape
         assert H == self.img_size[0] and W == self.img_size[1], \
             f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
         x = self.proj(x)
+        print(f"PE: x after  proj/Conv2D : {x.shape}")
         if self.flatten:
             x = x.flatten(2).transpose(1, 2)  # BCHW -> BNC
+            print(f"PE: x after  flatten : {x.shape}")
         x = self.norm(x)
+        print(f"PE: x after  norm : {x.shape}")
+
         return x
     
 
@@ -357,14 +365,21 @@ class VisionMamba(nn.Module):
     def forward_features(self, x, inference_params=None, if_random_cls_token_position=False, if_random_token_rank=False):
         # taken from https://github.com/rwightman/pytorch-image-models/blob/master/timm/models/vision_transformer.py
         # with slight modifications to add the dist_token
+        print(f"x size before embed: {x.shape}")
         x = self.patch_embed(x)
+        print(f"x size after embed: {x.shape}")
         B, M, _ = x.shape
         cls_token = self.cls_token.expand(B, -1, -1)
         token_position = M // 2
         # add cls token in the middle
         x = torch.cat((x[:, :token_position, :], cls_token, x[:, token_position:, :]), dim=1)
+        print(f"x size after cls token added : {x.shape}")
         x = x + self.pos_embed
+        print(f"x size after pos embedd : {x.shape}")
+
         x = self.pos_drop(x)
+        print(f"x size after pos_drop : {x.shape}")
+
 
         # mamba impl
         residual = None
@@ -374,7 +389,7 @@ class VisionMamba(nn.Module):
             hidden_states, residual = layer(
                 hidden_states, residual, inference_params=inference_params
             )
-        
+        debug = hidden_states.sum()
         # Set prenorm=False here since we don't need the residual
         fused_add_norm_fn = rms_norm_fn if isinstance(self.norm_f, RMSNorm) else layer_norm_fn
         hidden_states = fused_add_norm_fn(
@@ -413,19 +428,19 @@ def vim_small_patch16_stride8_224_bimambav2_final_pool_mean_abs_pos_embed_with_m
         model.load_state_dict(checkpoint["model"])
     return model
 
-@register_model
-def tome_vim_small_patch16_stride8_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2(pretrained=False, **kwargs):
+# @register_model
+# def tome_vim_small_patch16_stride8_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2(pretrained=False, **kwargs):
     
-    from tome.patch import mamba
-    model = VisionMamba(
-        patch_size=16, stride=8, embed_dim=384, depth=24, rms_norm=True, residual_in_fp32=True, fused_add_norm=True, final_pool_type='mean', if_abs_pos_embed=True, if_rope=False, if_rope_residual=False, bimamba_type="v2", if_cls_token=True, if_devide_out=True, use_middle_cls_token=True, **kwargs)
-    model.default_cfg = _cfg()
-    if pretrained:
-        checkpoint = torch.hub.load_state_dict_from_url(
-            url="to.do",
-            map_location="cpu", check_hash=True
-        )
-        model.load_state_dict(checkpoint["model"])
+#     from tome.patch import mamba
+#     model = VisionMamba(
+#         patch_size=16, stride=8, embed_dim=384, depth=24, rms_norm=True, residual_in_fp32=True, fused_add_norm=True, final_pool_type='mean', if_abs_pos_embed=True, if_rope=False, if_rope_residual=False, bimamba_type="v2", if_cls_token=True, if_devide_out=True, use_middle_cls_token=True, **kwargs)
+#     model.default_cfg = _cfg()
+#     if pretrained:
+#         #Never accessed in main as default
+#         checkpoint = torch.hub.load_state_dict_from_url(
+#             url="to.do",
+#             map_location="cpu", check_hash=True
+#         )
+#         model.load_state_dict(checkpoint["model"])
 
-    mamba.apply_patch(model) #TODO Do this in main?
-    return model
+#     return model

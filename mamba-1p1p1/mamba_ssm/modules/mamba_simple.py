@@ -155,7 +155,7 @@ class Mamba(nn.Module):
         self.D_b = nn.Parameter(torch.ones(self.d_inner, device=device))  # Keep in fp32
         self.D_b._no_weight_decay = True
 
-        self.out_proj = nn.Linear(self.d_inner, self.d_model, bias=bias, **factory_kwargs)
+        self.out_proj = nn.Linear(self.d_inner, self.d_model, bias=bias, **factory_kwargs) #TODO
 
     def forward(self, hidden_states, inference_params=None):
         """

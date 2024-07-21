@@ -118,6 +118,8 @@ def evaluate(data_loader, model, device, amp_autocast):
         # compute output
         with amp_autocast():
             output = model(images)
+            os = output.size()
+            ts = target.size()
             loss = criterion(output, target)
 
         acc1, acc5 = accuracy(output, target, topk=(1, 5))

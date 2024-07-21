@@ -1,5 +1,7 @@
 # Copyright (c) 2015-present, Facebook, Inc.
 # All rights reserved.
+from tome.patch import mamba
+
 import argparse
 import datetime
 import numpy as np
@@ -36,6 +38,7 @@ import mlflow
 def get_args_parser():
     parser = argparse.ArgumentParser('DeiT training and evaluation script', add_help=False)
     parser.add_argument('--batch-size', default=64, type=int)
+    parser.add_argument('--tome', action='store_true', help='Sets using tome to true')
     parser.add_argument('--gpu', default=0, type=int)
     parser.add_argument('--epochs', default=300, type=int)
     parser.add_argument('--bce-loss', action='store_true')
@@ -311,6 +314,7 @@ def main(args):
 
                     
     if args.finetune:
+        print("\n!\n!\n!\n!\n!\n!\n!\n!\n!")
         if args.finetune.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
                 args.finetune, map_location='cpu', check_hash=True)
@@ -380,6 +384,10 @@ def main(args):
             resume='')
 
     model_without_ddp = model
+    # Needs deepcopy, otherwise model and model_without_ddp_or_tome_model is same
+    # if args.tome:
+    #     model_without_ddp_or_tome_model = model
+    #     mambaapply_patch(model_without_ddp_or_tome_model)
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
         model_without_ddp = model.module
@@ -446,8 +454,10 @@ def main(args):
         else:
             checkpoint = torch.load(args.resume, map_location='cpu')
         model_without_ddp.load_state_dict(checkpoint['model'])
+        if args.tome:
+            mamba.apply_patch(model_without_ddp)
         if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
-            optimizer.load_state_dict(checkpoint['optimizer'])
+            optimizer.load_state_dict(checkpoint['optimizer']) #doesn't work directly if we use tome model
             lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
             args.start_epoch = checkpoint['epoch'] + 1
             if args.model_ema:
