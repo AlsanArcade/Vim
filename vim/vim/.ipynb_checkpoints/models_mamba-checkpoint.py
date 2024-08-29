@@ -371,6 +371,8 @@ class VisionMamba(nn.Module):
         B, M, _ = x.shape
         cls_token = self.cls_token.expand(B, -1, -1)
         token_position = M // 2
+        print(f"token pos {token_position}``n`n")
+        raise ValueError("Are you even looking here?")
         # add cls token in the middle
         x = torch.cat((x[:, :token_position, :], cls_token, x[:, token_position:, :]), dim=1)
         # print(f"x size after cls token added : {x.shape}")
